@@ -38,11 +38,24 @@ MONO = {'fontFamily': "'Consolas', 'Courier New', monospace", 'letterSpacing': '
 LABEL_STYLE = {'color': COLORS['text_sub'], 'fontSize': '0.75rem', 'fontWeight': '600', 'letterSpacing': '1px'}
 
 def format_num(val):
+    if pd.isna(val): return "0"
     return f"{val:,.0f}".replace(",", " ")
 
 def get_color(val):
     if pd.isna(val) or val == 0: return COLORS['text_main']
     return COLORS['up'] if val > 0 else COLORS['down']
+
+def render_cot_cell(val, chg, is_net=False):
+    """Funkcja pomocnicza do renderowania komórek z deltą (zmianą z ubiegłego tygodnia)"""
+    if pd.isna(val): val = 0
+    if pd.isna(chg): chg = 0
+    val_color = get_color(val) if is_net else COLORS['text_main']
+    chg_color = COLORS['up'] if chg > 0 else (COLORS['down'] if chg < 0 else COLORS['text_sub'])
+    sign = "+" if chg > 0 else ""
+    return html.Td([
+        html.Div(format_num(val), style={'color': val_color}),
+        html.Div(f"{sign}{format_num(chg)}", style={'fontSize': '0.7rem', 'color': chg_color, 'marginTop': '-2px'})
+    ], style=dict(MONO, textAlign='right', border='none', verticalAlign='middle', padding='0.5rem 0.5rem'))
 
 # ==========================================
 # 1. POBIERANIE DANYCH (MARKET & COT)
@@ -120,18 +133,40 @@ def fetch_cot_data(commodity_label="GOLD"):
         df_asset['Small_Index'] = calc_index(df_asset['Small_Net'])
 
         valid_rows = df_asset.dropna(subset=['Comm_Index'])
-        latest = valid_rows.iloc[-1] if not valid_rows.empty else df_asset.iloc[-1]
+        
+        # Pobieranie logiki delty (zmiana tydzień do tygodnia)
+        if len(valid_rows) >= 2:
+            latest = valid_rows.iloc[-1]
+            prev = valid_rows.iloc[-2]
+        elif not valid_rows.empty:
+            latest = valid_rows.iloc[-1]
+            prev = latest
+        else:
+            return None, None
 
-        def safe_get(col_name):
-            if col_name and col_name in latest: return latest[col_name]
+        def safe_get(row, col_name):
+            if col_name and col_name in row: return row[col_name]
             return 0
 
         return {
             'Date': latest['Parsed_Date'].strftime('%Y-%m-%d') if pd.notna(latest['Parsed_Date']) else '---',
-            'OI': safe_get(oi_col),
-            'Comm_Long': safe_get(comm_long_col), 'Comm_Short': safe_get(comm_short_col), 'Comm_Net': latest['Comm_Net'], 'Comm_Index': latest['Comm_Index'],
-            'NonComm_Long': safe_get(noncomm_long_col), 'NonComm_Short': safe_get(noncomm_short_col), 'NonComm_Net': latest['NonComm_Net'], 'NonComm_Index': latest['NonComm_Index'],
-            'Small_Long': safe_get(small_long_col), 'Small_Short': safe_get(small_short_col), 'Small_Net': latest['Small_Net'], 'Small_Index': latest['Small_Index']
+            'OI': safe_get(latest, oi_col),
+            'OI_Chg': safe_get(latest, oi_col) - safe_get(prev, oi_col),
+            
+            'Comm_Long': safe_get(latest, comm_long_col), 'Comm_Long_Chg': safe_get(latest, comm_long_col) - safe_get(prev, comm_long_col),
+            'Comm_Short': safe_get(latest, comm_short_col), 'Comm_Short_Chg': safe_get(latest, comm_short_col) - safe_get(prev, comm_short_col),
+            'Comm_Net': latest['Comm_Net'], 'Comm_Net_Chg': latest['Comm_Net'] - prev['Comm_Net'],
+            'Comm_Index': latest['Comm_Index'],
+            
+            'NonComm_Long': safe_get(latest, noncomm_long_col), 'NonComm_Long_Chg': safe_get(latest, noncomm_long_col) - safe_get(prev, noncomm_long_col),
+            'NonComm_Short': safe_get(latest, noncomm_short_col), 'NonComm_Short_Chg': safe_get(latest, noncomm_short_col) - safe_get(prev, noncomm_short_col),
+            'NonComm_Net': latest['NonComm_Net'], 'NonComm_Net_Chg': latest['NonComm_Net'] - prev['NonComm_Net'],
+            'NonComm_Index': latest['NonComm_Index'],
+            
+            'Small_Long': safe_get(latest, small_long_col), 'Small_Long_Chg': safe_get(latest, small_long_col) - safe_get(prev, small_long_col),
+            'Small_Short': safe_get(latest, small_short_col), 'Small_Short_Chg': safe_get(latest, small_short_col) - safe_get(prev, small_short_col),
+            'Small_Net': latest['Small_Net'], 'Small_Net_Chg': latest['Small_Net'] - prev['Small_Net'],
+            'Small_Index': latest['Small_Index']
         }, df_asset
     except: return None, None
 
@@ -191,7 +226,12 @@ cot_gold, df_asset_gold = fetch_cot_data("GOLD")
 cot_usd, _ = fetch_cot_data("DOLLAR INDEX")
 
 def safe_cot():
-    return {'Date': '---', 'OI': 0, 'Comm_Long': 0, 'Comm_Short': 0, 'Comm_Net': 0, 'Comm_Index': 50, 'NonComm_Long': 0, 'NonComm_Short': 0, 'NonComm_Net': 0, 'NonComm_Index': 50, 'Small_Long': 0, 'Small_Short': 0, 'Small_Net': 0, 'Small_Index': 50}
+    return {
+        'Date': '---', 'OI': 0, 'OI_Chg': 0, 
+        'Comm_Long': 0, 'Comm_Long_Chg': 0, 'Comm_Short': 0, 'Comm_Short_Chg': 0, 'Comm_Net': 0, 'Comm_Net_Chg': 0, 'Comm_Index': 50, 
+        'NonComm_Long': 0, 'NonComm_Long_Chg': 0, 'NonComm_Short': 0, 'NonComm_Short_Chg': 0, 'NonComm_Net': 0, 'NonComm_Net_Chg': 0, 'NonComm_Index': 50, 
+        'Small_Long': 0, 'Small_Long_Chg': 0, 'Small_Short': 0, 'Small_Short_Chg': 0, 'Small_Net': 0, 'Small_Net_Chg': 0, 'Small_Index': 50
+    }
 
 if cot_gold is None: cot_gold = safe_cot()
 if cot_usd is None: cot_usd = safe_cot()
@@ -212,6 +252,47 @@ if df_asset_gold is not None and not df_asset_gold.empty and len(df_asset_gold) 
             price_change = price_latest - price_past
         except:
             price_change = 0
+
+# --- DYNAMICZNA ANALIZA OPISOWA DANYCH COT ---
+c_index = cot_gold.get('Comm_Index', 50)
+c_net_chg = cot_gold.get('Comm_Net_Chg', 0)
+s_index = cot_gold.get('Small_Index', 50)
+oi_chg = cot_gold.get('OI_Chg', 0)
+
+# 1. Smart Money & Delta
+if c_index >= 75:
+    comm_desc = html.Span([html.B(f"Smart Money silnie kupują (Index: {c_index:.1f}%). ", style={'color': COLORS['up']}), "Jesteśmy w strefie ekstremalnego niedowartościowania. To potężny, historyczny sygnał na zbliżające się WZROSTY."])
+elif c_index <= 25:
+    comm_desc = html.Span([html.B(f"Smart Money silnie sprzedają (Index: {c_index:.1f}%). ", style={'color': COLORS['down']}), "Jesteśmy w strefie ekstremalnego przewartościowania. Kopalnie szykują się na SPADKI ceny złota."])
+else:
+    comm_desc = html.Span([html.B(f"Smart Money - Sentyment neutralny (Index: {c_index:.1f}%). ", style={'color': COLORS['text_main']}), "Brak skrajnego ułożenia kapitału. Oczekujemy na wyraźniejszy sygnał kierunkowy."])
+
+if c_net_chg > 0:
+    delta_desc = html.Span([html.B("Budowanie Byczej Presji: ", style={'color': COLORS['up']}), f"W ubiegłym tygodniu dołożyli do rynku netto {format_num(c_net_chg)} pozycji długich."])
+elif c_net_chg < 0:
+    delta_desc = html.Span([html.B("Budowanie Niedźwiedziej Presji: ", style={'color': COLORS['down']}), f"W ubiegłym tygodniu zredukowali rynek netto o {format_num(abs(c_net_chg))} pozycji (agresywne shortowanie)."])
+else:
+    delta_desc = html.Span("Brak znaczących zmian w pozycjonowaniu w ostatnim tygodniu.", style={'color': COLORS['text_sub']})
+
+# 2. Ulica (Dumb Money)
+if s_index >= 75:
+    small_desc = html.Span([html.B(f"Ulica w euforii (Index: {s_index:.1f}%). ", style={'color': COLORS['down']}), "Tłum agresywnie kupuje na górce. Złota zasada kontrariańska mówi: jeśli 'ulica' jest pewna wzrostów, szykuj się na brutalną korektę w dół."])
+elif s_index <= 25:
+    small_desc = html.Span([html.B(f"Ulica w panice (Index: {s_index:.1f}%). ", style={'color': COLORS['up']}), "Drobni inwestorzy uciekają z rynku. Kontrariańsko, to często najlepszy moment, by dołączyć do 'grubych ryb' i szukać pozycji LONG."])
+else:
+    small_desc = html.Span([html.B(f"Ulica bez kierunku (Index: {s_index:.1f}%). ", style={'color': COLORS['text_main']}), "Drobni spekulanci nie przejawiają skrajnych emocji, wskaźnik znajduje się pośrodku."])
+
+# 3. Open Interest i Momentum
+if price_change > 0 and oi_chg > 0:
+    oi_desc = html.Span([html.B("ZDROWA HOSSA (Silnik pełen paliwa). ", style={'color': COLORS['up']}), "Cena rośnie przy jednoczesnym wzroście Open Interest. Na rynek wchodzi ogromny, świeży kapitał wspierający długoterminowe wzrosty."])
+elif price_change > 0 and oi_chg < 0:
+    oi_desc = html.Span([html.B("SHORT SQUEEZE (Paliwo się kończy). ", style={'color': COLORS['down']}), "Cena rośnie, ale OI spada. Wzrosty wynikają głównie z panicznego uciekania sprzedających (zamykanie szortów). Słaby fundament do dalszych wzrostów."])
+elif price_change < 0 and oi_chg > 0:
+    oi_desc = html.Span([html.B("ZDROWA BESSA (Agresywna dystrybucja). ", style={'color': COLORS['down']}), "Cena spada, a OI drastycznie rośnie. Grubi gracze wlewają na rynek nowy kapitał do grania na spadki."])
+elif price_change < 0 and oi_chg < 0:
+    oi_desc = html.Span([html.B("KAPITULACJA (Spadki tracą impet). ", style={'color': COLORS['up']}), "Cena i OI spadają. Wyprzedaż ustaje, kapitał powoli ewakuuje się ze zyskownych szortów. Rynek szykuje się do uklepania mocnego dołka."])
+else:
+    oi_desc = html.Span([html.B("NEUTRALNIE. ", style={'color': COLORS['text_main']}), "Cena i OI nie ukształtowały w ostatnim tygodniu wyraźnej, skorelowanej dynamiki."])
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.DARKLY, dbc.icons.BOOTSTRAP])
 app.title = "XAU | Quant Terminal"
@@ -241,7 +322,18 @@ app.layout = html.Div([
                     
                     dbc.Row([
                         dbc.Col([
-                            html.Div(f"OPEN INTEREST: {format_num(cot_gold['OI'])}", style=dict(LABEL_STYLE, color=COLORS['gold'], marginBottom='10px')),
+                            html.Div([
+                                html.Span("OPEN INTEREST: "),
+                                html.Span(format_num(cot_gold['OI'])),
+                                html.Span(
+                                    f" ({'+' if cot_gold.get('OI_Chg', 0) > 0 else ''}{format_num(cot_gold.get('OI_Chg', 0))})", 
+                                    style={
+                                        'color': COLORS['up'] if cot_gold.get('OI_Chg', 0) > 0 else (COLORS['down'] if cot_gold.get('OI_Chg', 0) < 0 else COLORS['text_sub']), 
+                                        'fontSize': '0.75rem', 
+                                        'marginLeft': '5px'
+                                    }
+                                )
+                            ], style=dict(LABEL_STYLE, color=COLORS['gold'], marginBottom='10px')),
                             dbc.Table([
                                 html.Thead(html.Tr([
                                     html.Th("GRUPA RYNKOWA", style=dict(LABEL_STYLE, borderBottom=f"1px solid {COLORS['border']}")), 
@@ -252,25 +344,25 @@ app.layout = html.Div([
                                 ])),
                                 html.Tbody([
                                     html.Tr([
-                                        html.Td("COMMERCIALS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none')), 
-                                        html.Td(format_num(cot_gold['Comm_Long']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['Comm_Short']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['Comm_Net']), style=dict(MONO, color=get_color(cot_gold['Comm_Net']), textAlign='right', border='none')), 
-                                        html.Td(f"{cot_gold['Comm_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none'))
+                                        html.Td("COMMERCIALS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none', verticalAlign='middle')), 
+                                        render_cot_cell(cot_gold['Comm_Long'], cot_gold['Comm_Long_Chg']),
+                                        render_cot_cell(cot_gold['Comm_Short'], cot_gold['Comm_Short_Chg']),
+                                        render_cot_cell(cot_gold['Comm_Net'], cot_gold['Comm_Net_Chg'], is_net=True),
+                                        html.Td(f"{cot_gold['Comm_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none', verticalAlign='middle'))
                                     ]),
                                     html.Tr([
-                                        html.Td("LARGE SPECS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none')), 
-                                        html.Td(format_num(cot_gold['NonComm_Long']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['NonComm_Short']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['NonComm_Net']), style=dict(MONO, color=get_color(cot_gold['NonComm_Net']), textAlign='right', border='none')), 
-                                        html.Td(f"{cot_gold['NonComm_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none'))
+                                        html.Td("LARGE SPECS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none', verticalAlign='middle')), 
+                                        render_cot_cell(cot_gold['NonComm_Long'], cot_gold['NonComm_Long_Chg']),
+                                        render_cot_cell(cot_gold['NonComm_Short'], cot_gold['NonComm_Short_Chg']),
+                                        render_cot_cell(cot_gold['NonComm_Net'], cot_gold['NonComm_Net_Chg'], is_net=True),
+                                        html.Td(f"{cot_gold['NonComm_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none', verticalAlign='middle'))
                                     ]),
                                     html.Tr([
-                                        html.Td("SMALL TRADERS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none')), 
-                                        html.Td(format_num(cot_gold['Small_Long']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['Small_Short']), style=dict(MONO, color=COLORS['text_main'], textAlign='right', border='none')), 
-                                        html.Td(format_num(cot_gold['Small_Net']), style=dict(MONO, color=get_color(cot_gold['Small_Net']), textAlign='right', border='none')), 
-                                        html.Td(f"{cot_gold['Small_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none'))
+                                        html.Td("SMALL TRADERS", style=dict(LABEL_STYLE, color=COLORS['text_main'], border='none', verticalAlign='middle')), 
+                                        render_cot_cell(cot_gold['Small_Long'], cot_gold['Small_Long_Chg']),
+                                        render_cot_cell(cot_gold['Small_Short'], cot_gold['Small_Short_Chg']),
+                                        render_cot_cell(cot_gold['Small_Net'], cot_gold['Small_Net_Chg'], is_net=True),
+                                        html.Td(f"{cot_gold['Small_Index']:.1f}%", style=dict(MONO, color=COLORS['gold'], textAlign='right', border='none', verticalAlign='middle'))
                                     ])
                                 ])
                             ], size="sm", className="mb-0 table-borderless"),
@@ -280,6 +372,35 @@ app.layout = html.Div([
                             html.Div("POZYCJE NETTO (WIZUALIZACJA)", style=dict(LABEL_STYLE, textAlign='center', marginBottom='0px')),
                             dcc.Graph(id='cot-bar-chart', config={'displayModeBar': False}, style={'height': '140px'})
                         ], md=5, className="ps-4")
+                    ])
+                ], className="p-4")
+            ], style=CARD_STYLE, className="mb-4"), width=12)
+        ]),
+
+        # SEKCJA 1.5: BIEŻĄCA ANALIZA OPISOWA
+        dbc.Row([
+            dbc.Col(dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.Span("BIEŻĄCA ANALIZA DANYCH COT I PALIWA RYNKOWEGO (AI QUANT)", style=LABEL_STYLE),
+                    ], className="mb-3 border-bottom pb-2", style={'borderColor': COLORS['border']}),
+                    
+                    dbc.Row([
+                        dbc.Col([
+                            html.H6("SMART MONEY & DELTA (COMMERCIALS)", style={'color': COLORS['gold'], 'fontWeight': 'bold', 'fontSize': '0.85rem'}),
+                            html.P(comm_desc, style={'fontSize': '0.85rem', 'marginBottom': '5px', 'color': COLORS['text_sub']}),
+                            html.P(delta_desc, style={'fontSize': '0.85rem', 'marginBottom': '0', 'color': COLORS['text_sub']})
+                        ], md=4, className="border-end", style={'borderColor': COLORS['border']}),
+                        
+                        dbc.Col([
+                            html.H6("KONTRA-WSKAŹNIK (SMALL TRADERS)", style={'color': COLORS['gold'], 'fontWeight': 'bold', 'fontSize': '0.85rem'}),
+                            html.P(small_desc, style={'fontSize': '0.85rem', 'marginBottom': '0', 'color': COLORS['text_sub']})
+                        ], md=4, className="border-end", style={'borderColor': COLORS['border']}),
+                        
+                        dbc.Col([
+                            html.H6("DYNAMIKA KAPITAŁU (OPEN INTEREST)", style={'color': COLORS['gold'], 'fontWeight': 'bold', 'fontSize': '0.85rem'}),
+                            html.P(oi_desc, style={'fontSize': '0.85rem', 'marginBottom': '0', 'color': COLORS['text_sub']})
+                        ], md=4)
                     ])
                 ], className="p-4")
             ], style=CARD_STYLE, className="mb-4"), width=12)
